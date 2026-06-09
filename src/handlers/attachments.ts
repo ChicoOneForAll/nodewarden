@@ -345,10 +345,12 @@ export async function handleUpdateAttachmentMetadata(
   }
 
   await storage.saveAttachment(attachment);
-  const revisionInfo = await storage.updateCipherRevisionDate(cipherId);
-  if (revisionInfo) {
-    notifyVaultSyncForRequest(request, env, revisionInfo.userId, revisionInfo.revisionDate);
-  }
+  // Attachment metadata repair is a compatibility maintenance operation
+  // (like URI checksum repair / cipher key mismatch repair) — it must NOT
+  // update the cipher's "last edited" timestamp.  Only bump the user-level
+  // revision date so that clients pull the corrected attachment metadata.
+  const revisionDate = await storage.updateRevisionDate(userId);
+  notifyVaultSyncForRequest(request, env, userId, revisionDate);
 
   return jsonResponse({
     object: 'attachment',
