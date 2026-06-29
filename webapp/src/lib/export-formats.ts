@@ -9,6 +9,7 @@ configureZipJs({ useWebWorkers: false });
 
 export const EXPORT_FORMATS = [
   { id: 'bitwarden_json', label: 'Bitwarden (vault as json)' },
+  { id: 'bitwarden_csv', label: 'Bitwarden (vault as csv)' },
   { id: 'bitwarden_encrypted_json', label: 'Bitwarden (encrypted vault as json)' },
   { id: 'bitwarden_json_zip', label: 'Bitwarden (vault + attachments as zip)' },
   { id: 'bitwarden_encrypted_json_zip', label: 'Bitwarden (encrypted vault + attachments as zip)' },
@@ -68,6 +69,31 @@ interface PasswordProtectedArgs {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return !!value && typeof value === 'object';
+}
+
+function csvText(value: unknown): string {
+  if (value === null || value === undefined) return '';
+  if (typeof value === 'string') return value;
+  if (typeof value === 'number' || typeof value === 'boolean') return String(value);
+  try {
+    return JSON.stringify(value);
+  } catch {
+    return String(value);
+  }
+}
+
+function escapeCsvCell(value: unknown): string {
+  const text = csvText(value);
+  if (!/[",\r\n]/.test(text)) return text;
+  return `"${text.replace(/"/g, '""')}"`;
+}
+
+function buildCsvString(rows: string[][]): string {
+  return `${rows.map((row) => row.map(escapeCsvCell).join(',')).join('\r\n')}\r\n`;
+}
+
+function buildSingleRowCsvString(values: string[]): string {
+  return values.map(escapeCsvCell).join(',');
 }
 
 function isCipherString(value: string): boolean {
@@ -189,12 +215,15 @@ function mapCipherEncrypted(cipher: Cipher): Record<string, unknown> {
   const login = cipher.login;
   out.login = login
     ? {
+        ...cloneValue(login),
         username: login.username ?? null,
         password: login.password ?? null,
         totp: login.totp ?? null,
         uris: Array.isArray(login.uris)
           ? login.uris.map((uri) => ({
+              ...cloneValue(uri),
               uri: uri?.uri ?? null,
+              uriChecksum: uri?.uriChecksum ?? null,
               match: (uri as { match?: unknown })?.match ?? null,
             }))
           : [],
@@ -380,6 +409,144 @@ export async function buildPlainBitwardenJsonString(args: BuildPlainJsonArgs): P
   return JSON.stringify(doc, null, 2);
 }
 
+const BITWARDEN_CSV_HEADERS = [
+  'folder',
+  'favorite',
+  'type',
+  'name',
+  'notes',
+  'fields',
+  'reprompt',
+  'login_uri',
+  'login_username',
+  'login_password',
+  'login_totp',
+] as const;
+
+function bitwardenCsvType(type: number): 'login' | 'note' {
+  return type === 1 ? 'login' : 'note';
+}
+
+function sourceTypeLabel(type: number): string {
+  if (type === 3) return 'card';
+  if (type === 4) return 'identity';
+  if (type === 5) return 'sshKey';
+  if (type === 2) return 'note';
+  return `type ${type}`;
+}
+
+function appendFieldLine(lines: string[], name: unknown, value: unknown): void {
+  const key = csvText(name).trim();
+  const text = csvText(value);
+  if (!key || !text) return;
+  lines.push(`${key}: ${text}`);
+}
+
+function appendRecordFieldLines(lines: string[], prefix: string, value: unknown): void {
+  if (!isRecord(value)) return;
+  for (const [key, fieldValue] of Object.entries(value)) {
+    appendFieldLine(lines, `${prefix}.${key}`, fieldValue);
+  }
+}
+
+const BITWARDEN_CSV_OBJECT_FIELDS: Record<string, readonly string[]> = {
+  card: ['cardholderName', 'brand', 'number', 'expMonth', 'expYear', 'code'],
+  identity: [
+    'title',
+    'firstName',
+    'middleName',
+    'lastName',
+    'username',
+    'company',
+    'ssn',
+    'passportNumber',
+    'licenseNumber',
+    'email',
+    'phone',
+    'address1',
+    'address2',
+    'address3',
+    'city',
+    'state',
+    'postalCode',
+    'country',
+  ],
+  sshKey: ['privateKey', 'publicKey', 'keyFingerprint', 'fingerprint'],
+};
+
+function appendKnownRecordFieldLines(lines: string[], prefix: string, value: unknown): void {
+  if (!isRecord(value)) return;
+  const keys = BITWARDEN_CSV_OBJECT_FIELDS[prefix];
+  if (!keys) {
+    appendRecordFieldLines(lines, prefix, value);
+    return;
+  }
+  for (const key of keys) {
+    appendFieldLine(lines, `${prefix}.${key}`, value[key]);
+  }
+}
+
+function buildBitwardenCsvFields(item: Record<string, unknown>, type: number): string {
+  const lines: string[] = [];
+  const fields = Array.isArray(item.fields) ? item.fields : [];
+  for (const field of fields) {
+    if (!isRecord(field)) continue;
+    appendFieldLine(lines, field.name, field.value);
+  }
+  if (type !== 1 && type !== 2) {
+    const sourceLabel = sourceTypeLabel(type);
+    appendFieldLine(lines, 'nodewardenType', sourceLabel);
+    appendKnownRecordFieldLines(lines, sourceLabel, item[sourceLabel]);
+  }
+  return lines.join('\n');
+}
+
+function buildFolderNameById(foldersRaw: unknown): Map<string, string> {
+  const out = new Map<string, string>();
+  const folders = Array.isArray(foldersRaw) ? foldersRaw : [];
+  for (const folder of folders) {
+    if (!isRecord(folder)) continue;
+    const id = csvText(folder.id).trim();
+    if (!id) continue;
+    out.set(id, csvText(folder.name));
+  }
+  return out;
+}
+
+function buildBitwardenCsvLoginUri(login: Record<string, unknown> | null): string {
+  const uris = Array.isArray(login?.uris) ? login.uris : [];
+  return buildSingleRowCsvString(uris
+    .map((uri) => (isRecord(uri) ? csvText(uri.uri).trim() : ''))
+    .filter(Boolean));
+}
+
+export function buildBitwardenCsvString(bitwardenJsonDoc: Record<string, unknown>): string {
+  const folderNameById = buildFolderNameById(bitwardenJsonDoc.folders);
+  const rows: string[][] = [[...BITWARDEN_CSV_HEADERS]];
+  const items = Array.isArray(bitwardenJsonDoc.items) ? bitwardenJsonDoc.items : [];
+  for (const itemRaw of items) {
+    if (!isRecord(itemRaw)) continue;
+    const type = normalizeNumber(itemRaw.type, 1);
+    const isLogin = type === 1;
+    const login = isRecord(itemRaw.login) ? itemRaw.login : null;
+    const folderId = csvText(itemRaw.folderId).trim();
+    rows.push([
+      folderNameById.get(folderId) || '',
+      itemRaw.favorite ? '1' : '0',
+      bitwardenCsvType(type),
+      csvText(itemRaw.name) || '--',
+      csvText(itemRaw.notes),
+      buildBitwardenCsvFields(itemRaw, type),
+      String(normalizeNumber(itemRaw.reprompt, 0)),
+      isLogin ? buildBitwardenCsvLoginUri(login) : '',
+      isLogin ? csvText(login?.username) : '',
+      isLogin ? csvText(login?.password) : '',
+      isLogin ? csvText(login?.totp) : '',
+    ]);
+  }
+  return `\uFEFF${buildCsvString(rows)}`;
+}
+
 export async function buildAccountEncryptedBitwardenJsonString(args: BuildEncryptedJsonArgs): Promise<string> {
   const userEnc = base64ToBytes(args.userEncB64);
   const userMac = base64ToBytes(args.userMacB64);
@@ -563,11 +730,13 @@ function nowStamp(now = new Date()): string {
 export function buildExportFileName(format: ExportFormatId, zipEncrypted = false): string {
   const stamp = nowStamp();
   if (
+    format === 'bitwarden_csv' ||
     format === 'bitwarden_json' ||
     format === 'bitwarden_encrypted_json' ||
     format === 'nodewarden_json' ||
     format === 'nodewarden_encrypted_json'
   ) {
+    if (format === 'bitwarden_csv') return `bitwarden_export_${stamp}.csv`;
     if (format.startsWith('nodewarden_')) return `nodewarden_export_${stamp}.json`;
     return `bitwarden_export_${stamp}.json`;
   }

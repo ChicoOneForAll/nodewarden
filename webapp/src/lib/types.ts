@@ -314,6 +314,8 @@ export interface TokenSuccess {
   ResetMasterPassword?: boolean;
   scope?: string;
   unofficialServer?: boolean;
+  UserVerificationToken?: string;
+  userVerificationToken?: string;
   UserDecryptionOptions?: unknown;
   userDecryptionOptions?: unknown;
   VaultKeys?: {
@@ -326,6 +328,54 @@ export interface TokenError {
   error?: string;
   error_description?: string;
   TwoFactorProviders?: unknown;
+}
+
+export interface AccountPasskeyCredential {
+  id: string;
+  name: string;
+  prfStatus: 0 | 1 | 2;
+  encryptedPublicKey?: string | null;
+  encryptedUserKey?: string | null;
+  creationDate?: string;
+  revisionDate?: string;
+}
+
+export interface AuthRequest {
+  id: string;
+  publicKey: string;
+  requestDeviceType?: string | null;
+  requestDeviceTypeValue?: number | null;
+  requestDeviceIdentifier: string;
+  requestIpAddress?: string | null;
+  requestCountryName?: string | null;
+  key?: string | null;
+  creationDate: string;
+  requestApproved?: boolean | null;
+  responseDate?: string | null;
+  deviceId?: string | null;
+  requestDeviceId?: string | null;
+  fingerprintPhrase?: string;
+}
+
+export interface AccountPasskeyAssertionOptionsResponse {
+  options: PublicKeyCredentialRequestOptions;
+  token: string;
+}
+
+export interface AccountPasskeyCreationOptionsResponse {
+  options: PublicKeyCredentialCreationOptions;
+  token: string;
+}
+
+export interface AccountPasskeyPrfOption {
+  EncryptedPrivateKey?: string;
+  EncryptedUserKey?: string;
+  CredentialId?: string;
+  Transports?: string[];
+  encryptedPrivateKey?: string;
+  encryptedUserKey?: string;
+  credentialId?: string;
+  transports?: string[];
 }
 
 export interface ToastMessage {

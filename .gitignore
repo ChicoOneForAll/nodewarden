@@ -18,6 +18,7 @@ build/
 .idea/
 *.swp
 *.swo
+docs/
 
 # OS
 .DS_Store
@@ -40,6 +41,7 @@ npm-debug.log*
 
 tmp/
 .tmp/
+.tmp-bitwarden-clients/
 
 nodewarden.wiki/
 wiki/
@@ -51,3 +53,17 @@ NodeWarden-compat/
 # GitHub Actions workflows are maintained manually in this fork.
 # Do not sync upstream workflow files via automation.
 .github/workflows/
+.codex-upstream/
+.codex-upstream/bitwarden-server/
+.codex-upstream/bitwarden-clients/
+.codex-upstream/bitwarden-web/
+.codex-upstream/bitwarden-browser/
+
+.reasonix/
+.upstream/
+
+# Compatibility analysis documents
+BITWARDEN_COMPATIBILITY_ANALYSIS.md
+.mcp.json
+opencode.jsonc
+.cursor/

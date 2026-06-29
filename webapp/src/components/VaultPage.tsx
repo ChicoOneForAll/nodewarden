@@ -17,13 +17,14 @@ import {
   createEmptyDraft,
   creationTimeValue,
   draftFromCipher,
-  buildCipherDuplicateSignature,
+  buildCipherDuplicateSignatures,
   firstCipherUri,
   firstPasskeyCreationTime,
   isCipherVisibleInArchive,
   isCipherVisibleInNormalVault,
   isCipherVisibleInTrash,
   sortTimeValue,
+  type DuplicateDetectionMode,
   type SidebarFilter,
   type VaultSortMode,
 } from '@/components/vault/vault-page-helpers';
@@ -79,6 +80,7 @@ export default function VaultPage(props: VaultPageProps) {
   const [sortMenuOpen, setSortMenuOpen] = useState(false);
   const [folderSortMode, setFolderSortMode] = useState<VaultSortMode>('name');
   const [folderSortMenuOpen, setFolderSortMenuOpen] = useState(false);
+  const [duplicateMode, setDuplicateMode] = useState<DuplicateDetectionMode>('exact');
   const [sidebarFilter, setSidebarFilter] = useState<SidebarFilter>({ kind: 'all' });
   const [selectedCipherId, setSelectedCipherId] = useState('');
   const [selectedMap, setSelectedMap] = useState<Record<string, boolean>>({});
@@ -338,16 +340,41 @@ export default function VaultPage(props: VaultPageProps) {
 
   const duplicateSignatureInfo = useMemo(() => {
     if (sidebarFilter.kind !== 'duplicates') return null;
-    const byId = new Map<string, string>();
+    const byId = new Map<string, string[]>();
     const counts = new Map<string, number>();
     for (const cipher of props.ciphers) {
       if (!isCipherVisibleInNormalVault(cipher)) continue;
-      const signature = buildCipherDuplicateSignature(cipher);
-      byId.set(cipher.id, signature);
-      counts.set(signature, (counts.get(signature) || 0) + 1);
+      const signatures = Array.from(new Set(buildCipherDuplicateSignatures(cipher, duplicateMode)));
+      byId.set(cipher.id, signatures);
+      for (const signature of signatures) {
+        counts.set(signature, (counts.get(signature) || 0) + 1);
+      }
     }
     return { byId, counts };
-  }, [props.ciphers, sidebarFilter.kind]);
+  }, [props.ciphers, sidebarFilter.kind, duplicateMode]);
+
+  const duplicateGroupIndexById = useMemo(() => {
+    if (!duplicateSignatureInfo) return new Map<string, number>();
+    const groupKeyById = new Map<string, string>();
+    const groupKeys = new Set<string>();
+    for (const cipher of props.ciphers) {
+      const groupKey = (duplicateSignatureInfo.byId.get(cipher.id) || [])
+        .filter((signature) => (duplicateSignatureInfo.counts.get(signature) || 0) >= 2)
+        .sort()[0];
+      if (!groupKey) continue;
+      groupKeyById.set(cipher.id, groupKey);
+      groupKeys.add(groupKey);
+    }
+    const groupIndexByKey = new Map<string, number>();
+    Array.from(groupKeys).sort().forEach((groupKey, index) => {
+      groupIndexByKey.set(groupKey, index % 64);
+    });
+    const byId = new Map<string, number>();
+    for (const [cipherId, groupKey] of groupKeyById.entries()) {
+      byId.set(cipherId, groupIndexByKey.get(groupKey) || 0);
+    }
+    return byId;
+  }, [props.ciphers, duplicateSignatureInfo]);
 
   const filteredCiphers = useMemo(() => {
     const next = props.ciphers.filter((cipher) => {
@@ -358,8 +385,11 @@ export default function VaultPage(props: VaultPageProps) {
         if (!isCipherVisibleInArchive(cipher)) return false;
       } else {
         if (!isCipherVisibleInNormalVault(cipher)) return false;
-        if (sidebarFilter.kind === 'duplicates' && ((duplicateSignatureInfo?.counts.get(duplicateSignatureInfo.byId.get(cipher.id) || '') || 0) < 2)) {
-          return false;
+        if (sidebarFilter.kind === 'duplicates') {
+          const signatures = duplicateSignatureInfo?.byId.get(cipher.id) || [];
+          if (!signatures.some((signature) => (duplicateSignatureInfo?.counts.get(signature) || 0) >= 2)) {
+            return false;
+          }
         }
         if (sidebarFilter.kind === 'favorite' && !cipher.favorite) return false;
         if (sidebarFilter.kind === 'type' && meta?.typeKey !== sidebarFilter.value) return false;
@@ -404,8 +434,9 @@ export default function VaultPage(props: VaultPageProps) {
   const sidebarFilterKey = useMemo(() => {
     if (sidebarFilter.kind === 'folder') return `folder:${sidebarFilter.folderId ?? 'none'}`;
     if (sidebarFilter.kind === 'type') return `type:${sidebarFilter.value}`;
+    if (sidebarFilter.kind === 'duplicates') return `duplicates:${duplicateMode}`;
     return sidebarFilter.kind;
-  }, [sidebarFilter]);
+  }, [sidebarFilter, duplicateMode]);
 
   useEffect(() => {
     setListScrollTop(0);
@@ -418,6 +449,10 @@ export default function VaultPage(props: VaultPageProps) {
       setSortMode('name');
     }
   }, [sidebarFilter.kind, sortMode]);
+
+  useEffect(() => {
+    if (sidebarFilter.kind === 'duplicates') setSelectedMap({});
+  }, [sidebarFilter.kind, duplicateMode]);
 
   useEffect(() => {
     if (isCreating) return;
@@ -716,6 +751,8 @@ const folderName = useCallback((id: string | null | undefined): string => {
       setAttachmentQueue([]);
       setRemovedAttachmentIds({});
       if (isMobileLayout) setMobilePanel('detail');
+    } catch {
+      // The action layer already shows the user-facing error toast.
     } finally {
       setBusy(false);
     }
@@ -729,6 +766,8 @@ const folderName = useCallback((id: string | null | undefined): string => {
       setPendingDelete(null);
       cancelEdit();
       if (isMobileLayout) setMobilePanel('list');
+    } catch {
+      // The action layer already shows the user-facing error toast.
     } finally {
       setBusy(false);
     }
@@ -741,6 +780,8 @@ const folderName = useCallback((id: string | null | undefined): string => {
       if (isMobileLayout && selectedCipherId === cipher.id) {
         setMobilePanel('list');
       }
+    } catch {
+      // The action layer already shows the user-facing error toast.
     } finally {
       setBusy(false);
     }
@@ -760,6 +801,8 @@ const folderName = useCallback((id: string | null | undefined): string => {
       }
       setSelectedMap({});
       setBulkDeleteOpen(false);
+    } catch {
+      // The action layer already shows the user-facing error toast.
     } finally {
       setBusy(false);
     }
@@ -776,6 +819,8 @@ const folderName = useCallback((id: string | null | undefined): string => {
       await props.onBulkMove(ids, folderId);
       setSelectedMap({});
       setMoveOpen(false);
+    } catch {
+      // The action layer already shows the user-facing error toast.
     } finally {
       setBusy(false);
     }
@@ -785,6 +830,8 @@ const folderName = useCallback((id: string | null | undefined): string => {
     setBusy(true);
     try {
       await props.onRefresh();
+    } catch {
+      // The action layer already shows the user-facing error toast.
     } finally {
       setBusy(false);
     }
@@ -819,6 +866,8 @@ const folderName = useCallback((id: string | null | undefined): string => {
       await props.onCreateFolder(newFolderName);
       setCreateFolderOpen(false);
       setNewFolderName('');
+    } catch {
+      // The action layer already shows the user-facing error toast.
     } finally {
       setBusy(false);
     }
@@ -833,6 +882,8 @@ const folderName = useCallback((id: string | null | undefined): string => {
         setSidebarFilter({ kind: 'all' });
       }
       setPendingDeleteFolder(null);
+    } catch {
+      // The action layer already shows the user-facing error toast.
     } finally {
       setBusy(false);
     }
@@ -850,6 +901,8 @@ const folderName = useCallback((id: string | null | undefined): string => {
       await props.onRenameFolder(pendingRenameFolder.id, nextName);
       setPendingRenameFolder(null);
       setRenameFolderName('');
+    } catch {
+      // The action layer already shows the user-facing error toast.
     } finally {
       setBusy(false);
     }
@@ -864,6 +917,8 @@ const folderName = useCallback((id: string | null | undefined): string => {
     try {
       await props.onBulkRestore(ids);
       setSelectedMap({});
+    } catch {
+      // The action layer already shows the user-facing error toast.
     } finally {
       setBusy(false);
     }
@@ -878,6 +933,8 @@ const folderName = useCallback((id: string | null | undefined): string => {
       if (isMobileLayout && selectedCipherId === pendingArchive.id) {
         setMobilePanel('list');
       }
+    } catch {
+      // The action layer already shows the user-facing error toast.
     } finally {
       setBusy(false);
     }
@@ -892,6 +949,8 @@ const folderName = useCallback((id: string | null | undefined): string => {
         delete next[cipher.id];
         return next;
       });
+    } catch {
+      // The action layer already shows the user-facing error toast.
     } finally {
       setBusy(false);
     }
@@ -907,6 +966,8 @@ const folderName = useCallback((id: string | null | undefined): string => {
       await props.onBulkArchive(ids);
       setSelectedMap({});
       setBulkArchiveOpen(false);
+    } catch {
+      // The action layer already shows the user-facing error toast.
     } finally {
       setBusy(false);
     }
@@ -921,6 +982,8 @@ const folderName = useCallback((id: string | null | undefined): string => {
     try {
       await props.onBulkUnarchive(ids);
       setSelectedMap({});
+    } catch {
+      // The action layer already shows the user-facing error toast.
     } finally {
       setBusy(false);
     }
@@ -935,6 +998,8 @@ const folderName = useCallback((id: string | null | undefined): string => {
         setSidebarFilter({ kind: 'all' });
       }
       setDeleteAllFoldersOpen(false);
+    } catch {
+      // The action layer already shows the user-facing error toast.
     } finally {
       setBusy(false);
     }
@@ -954,10 +1019,11 @@ const folderName = useCallback((id: string | null | undefined): string => {
   const handleSyncVault = useCallback(() => { void syncVault(); }, [props.onRefresh]);
   const handleOpenBulkDelete = useCallback(() => setBulkDeleteOpen(true), []);
   const handleSelectDuplicates = useCallback(() => {
+    if (duplicateMode !== 'exact') return;
     const map: Record<string, boolean> = {};
     const seen = new Set<string>();
     for (const cipher of filteredCiphers) {
-      const signature = duplicateSignatureInfo?.byId.get(cipher.id) || buildCipherDuplicateSignature(cipher);
+      const signature = duplicateSignatureInfo?.byId.get(cipher.id)?.[0] || buildCipherDuplicateSignatures(cipher, 'exact')[0];
       if (seen.has(signature)) {
         map[cipher.id] = true;
         continue;
@@ -965,7 +1031,7 @@ const folderName = useCallback((id: string | null | undefined): string => {
       seen.add(signature);
     }
     setSelectedMap(map);
-  }, [filteredCiphers, duplicateSignatureInfo]);
+  }, [filteredCiphers, duplicateSignatureInfo, duplicateMode]);
   const handleSelectAll = useCallback(() => {
     const map: Record<string, boolean> = {};
     for (const cipher of filteredCiphers) map[cipher.id] = true;
@@ -1049,13 +1115,16 @@ const folderName = useCallback((id: string | null | undefined): string => {
           busy={busy}
           loading={props.loading}
           error={props.error}
+          folders={props.folders}
           searchInput={searchInput}
           sortMode={sortMode}
           sortMenuOpen={sortMenuOpen}
+          duplicateMode={duplicateMode}
           selectedCount={selectedCount}
           totalCipherCount={totalCipherCount}
           filteredCiphers={filteredCiphers}
           visibleCiphers={visibleCiphers}
+          duplicateGroupIndexById={duplicateGroupIndexById}
           virtualRange={virtualRange}
           selectedCipherId={selectedCipherId}
           selectedMap={selectedMap}
@@ -1072,6 +1141,8 @@ const folderName = useCallback((id: string | null | undefined): string => {
           onSearchCompositionEnd={handleSearchCompositionEnd}
           onToggleSortMenu={handleToggleSortMenu}
           onSelectSortMode={handleSelectSortMode}
+          onDuplicateModeChange={setDuplicateMode}
+          onChangeFilter={setSidebarFilter}
           onSyncVault={handleSyncVault}
           onOpenBulkDelete={handleOpenBulkDelete}
           onSelectDuplicates={handleSelectDuplicates}

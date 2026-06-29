@@ -8,7 +8,7 @@ import type { AdminBackupImportResponse, AdminBackupRunResponse, AdminBackupSett
 import type { AuditLogFilters } from '@/lib/api/admin';
 import type { CiphersImportPayload } from '@/lib/api/vault';
 import { t } from '@/lib/i18n';
-import type { AdminInvite, AdminUser, AuditLogListResult, AuditLogSettings, AuthorizedDevice, Cipher, CustomEquivalentDomain, DomainRules, Folder as VaultFolder, Profile, Send, SendDraft, SessionState, VaultDraft } from '@/lib/types';
+import type { AccountPasskeyCredential, AdminInvite, AdminUser, AuditLogListResult, AuditLogSettings, AuthRequest, AuthorizedDevice, Cipher, CustomEquivalentDomain, DomainRules, Folder as VaultFolder, Profile, Send, SendDraft, SessionState, VaultDraft } from '@/lib/types';
 import type { ExportRequest } from '@/lib/export-formats';
 
 const VaultPage = lazy(() => import('@/components/VaultPage'));
@@ -57,6 +57,7 @@ export interface AppMainRoutesProps {
   lockTimeoutMinutes: 0 | 1 | 5 | 15 | 30;
   sessionTimeoutAction: 'lock' | 'logout';
   authorizedDevices: AuthorizedDevice[];
+  currentDeviceIdentifier: string;
   authorizedDevicesLoading: boolean;
   authorizedDevicesError: string;
   domainRules: DomainRules | null;
@@ -107,11 +108,21 @@ export interface AppMainRoutesProps {
   sendUploadPercent: number | null;
   onChangePassword: (currentPassword: string, nextPassword: string, nextPassword2: string) => Promise<void>;
   onSavePasswordHint: (masterPasswordHint: string) => Promise<void>;
-  onEnableTotp: (secret: string, token: string) => Promise<void>;
+  onEnableTotp: (secret: string, token: string, masterPassword: string) => Promise<void>;
   onOpenDisableTotp: () => void;
   onGetRecoveryCode: (masterPassword: string) => Promise<string>;
   onGetApiKey: (masterPassword: string) => Promise<string>;
   onRotateApiKey: (masterPassword: string) => Promise<string>;
+  onListAccountPasskeys: () => Promise<AccountPasskeyCredential[]>;
+  onCreateAccountPasskey: (name: string, masterPassword: string, directUnlock: boolean) => Promise<AccountPasskeyCredential | null>;
+  onEnableAccountPasskeyDirectUnlock: (id: string, masterPassword: string) => Promise<void>;
+  onDeleteAccountPasskey: (id: string, masterPassword: string) => Promise<void>;
+  pendingAuthRequests: AuthRequest[];
+  pendingAuthRequestsLoading: boolean;
+  pendingAuthRequestsRefreshing: boolean;
+  onRefreshPendingAuthRequests: () => Promise<void>;
+  onApproveAuthRequest: (request: AuthRequest) => Promise<void>;
+  onDenyAuthRequest: (request: AuthRequest) => Promise<void>;
   onLockTimeoutChange: (minutes: 0 | 1 | 5 | 15 | 30) => void;
   onSessionTimeoutActionChange: (action: 'lock' | 'logout') => void;
   onRefreshAuthorizedDevices: () => Promise<void>;
@@ -121,34 +132,37 @@ export interface AppMainRoutesProps {
   onRevokeDeviceTrust: (device: AuthorizedDevice) => void;
   onTrustDevicePermanently: (device: AuthorizedDevice) => void;
   onRemoveDevice: (device: AuthorizedDevice) => void;
+  onRemoveSelectedDevices: (devices: AuthorizedDevice[]) => void;
   onRevokeAllDeviceTrust: () => void;
   onRemoveAllDevices: () => void;
   onCreateInvite: (hours: number) => Promise<void>;
   onRefreshAdmin: () => void;
+  onDeleteInvalidInvites: () => Promise<void>;
   onDeleteAllInvites: () => Promise<void>;
   onToggleUserStatus: (userId: string, status: 'active' | 'banned') => Promise<void>;
   onDeleteUser: (userId: string) => Promise<void>;
-  onRevokeInvite: (code: string) => Promise<void>;
+  onDeleteInvite: (code: string) => Promise<void>;
   onLoadAuditLogs: (filters: AuditLogFilters) => Promise<AuditLogListResult>;
   onLoadAuditLogSettings: () => Promise<AuditLogSettings>;
   onSaveAuditLogSettings: (settings: AuditLogSettings) => Promise<AuditLogSettings>;
   onClearAuditLogs: () => Promise<number>;
-  onExportBackup: (includeAttachments?: boolean) => Promise<void>;
-  onImportBackup: (file: File, replaceExisting?: boolean) => Promise<AdminBackupImportResponse>;
-  onImportBackupAllowingChecksumMismatch: (file: File, replaceExisting?: boolean) => Promise<AdminBackupImportResponse>;
+  onExportBackup: (masterPassword: string, includeAttachments?: boolean) => Promise<void>;
+  onImportBackup: (masterPassword: string, file: File, replaceExisting?: boolean) => Promise<AdminBackupImportResponse>;
+  onImportBackupAllowingChecksumMismatch: (masterPassword: string, file: File, replaceExisting?: boolean) => Promise<AdminBackupImportResponse>;
   onLoadBackupSettings: () => Promise<AdminBackupSettings>;
-  onSaveBackupSettings: (settings: AdminBackupSettings) => Promise<AdminBackupSettings>;
-  onRunRemoteBackup: (destinationId?: string | null) => Promise<AdminBackupRunResponse>;
+  onSaveBackupSettings: (masterPassword: string, settings: AdminBackupSettings) => Promise<AdminBackupSettings>;
+  onRunRemoteBackup: (masterPassword: string, destinationId?: string | null) => Promise<AdminBackupRunResponse>;
   onListRemoteBackups: (destinationId: string, path: string) => Promise<RemoteBackupBrowserResponse>;
-  onDownloadRemoteBackup: (destinationId: string, path: string, onProgress?: (percent: number | null) => void) => Promise<void>;
+  onDownloadRemoteBackup: (masterPassword: string, destinationId: string, path: string, onProgress?: (percent: number | null) => void) => Promise<void>;
   onInspectRemoteBackup: (destinationId: string, path: string) => Promise<{ object: 'backup-remote-integrity'; destinationId: string; path: string; fileName: string; integrity: { hasChecksumPrefix: boolean; expectedPrefix: string | null; actualPrefix: string; matches: boolean } }>;
   onDeleteRemoteBackup: (destinationId: string, path: string) => Promise<void>;
-  onRestoreRemoteBackup: (destinationId: string, path: string, replaceExisting?: boolean) => Promise<AdminBackupImportResponse>;
-  onRestoreRemoteBackupAllowingChecksumMismatch: (destinationId: string, path: string, replaceExisting?: boolean) => Promise<AdminBackupImportResponse>;
+  onRestoreRemoteBackup: (masterPassword: string, destinationId: string, path: string, replaceExisting?: boolean) => Promise<AdminBackupImportResponse>;
+  onRestoreRemoteBackupAllowingChecksumMismatch: (masterPassword: string, destinationId: string, path: string, replaceExisting?: boolean) => Promise<AdminBackupImportResponse>;
 }
 
 export default function AppMainRoutes(props: AppMainRoutesProps) {
   const importRoutePaths = [props.importRoute, '/tools/import', '/tools/import-export', '/tools/import-data', '/import', '/import-export'] as const;
+  const deviceManagementRoutePaths = ['/security/devices', '/settings/security/device-management'] as const;
   const isAdmin = String(props.profile?.role || '').toLowerCase() === 'admin';
   const importPageContent = (
     <Suspense fallback={<RouteContentFallback />}>
@@ -261,6 +275,10 @@ export default function AppMainRoutes(props: AppMainRoutesProps) {
                 onGetRecoveryCode={props.onGetRecoveryCode}
                 onGetApiKey={props.onGetApiKey}
                 onRotateApiKey={props.onRotateApiKey}
+                onListAccountPasskeys={props.onListAccountPasskeys}
+                onCreateAccountPasskey={props.onCreateAccountPasskey}
+                onEnableAccountPasskeyDirectUnlock={props.onEnableAccountPasskeyDirectUnlock}
+                onDeleteAccountPasskey={props.onDeleteAccountPasskey}
                 onLockTimeoutChange={props.onLockTimeoutChange}
                 onSessionTimeoutActionChange={props.onSessionTimeoutActionChange}
                 onNotify={props.onNotify}
@@ -279,7 +297,7 @@ export default function AppMainRoutes(props: AppMainRoutesProps) {
                 <SettingsIcon size={18} />
                 <span>{t('nav_account_settings')}</span>
               </Link>
-              <Link href="/security/devices" className="mobile-settings-link">
+              <Link href="/settings/security/device-management" className="mobile-settings-link">
                 <Shield size={18} />
                 <span>{t('nav_device_management')}</span>
               </Link>
@@ -319,32 +337,42 @@ export default function AppMainRoutes(props: AppMainRoutesProps) {
           <LoadingState card lines={4} />
         ) : null}
       </Route>
-      <Route path="/security/devices">
-        <div className="stack">
-          {props.mobileLayout && (
-            <div className="mobile-settings-subhead">
-              <button type="button" className="btn btn-secondary small mobile-settings-back" onClick={() => props.onNavigate(props.settingsHomeRoute)}>
-                <span className="btn-icon" aria-hidden="true">{"<"}</span>
-                {t('txt_back')}
-              </button>
-            </div>
-          )}
-          <Suspense fallback={<RouteContentFallback />}>
-            <SecurityDevicesPage
-              devices={props.authorizedDevices}
-              loading={props.authorizedDevicesLoading}
-              error={props.authorizedDevicesError}
-              onRefresh={() => void props.onRefreshAuthorizedDevices()}
-              onRenameDevice={props.onRenameAuthorizedDevice}
-              onRevokeTrust={props.onRevokeDeviceTrust}
-              onTrustPermanently={props.onTrustDevicePermanently}
-              onRemoveDevice={props.onRemoveDevice}
-              onRevokeAll={props.onRevokeAllDeviceTrust}
-              onRemoveAll={props.onRemoveAllDevices}
-            />
-          </Suspense>
-        </div>
-      </Route>
+      {deviceManagementRoutePaths.map((path) => (
+        <Route key={path} path={path}>
+          <div className="stack">
+            {props.mobileLayout && (
+              <div className="mobile-settings-subhead">
+                <button type="button" className="btn btn-secondary small mobile-settings-back" onClick={() => props.onNavigate(props.settingsHomeRoute)}>
+                  <span className="btn-icon" aria-hidden="true">{"<"}</span>
+                  {t('txt_back')}
+                </button>
+              </div>
+            )}
+            <Suspense fallback={<RouteContentFallback />}>
+              <SecurityDevicesPage
+                devices={props.authorizedDevices}
+                currentDeviceIdentifier={props.currentDeviceIdentifier}
+                loading={props.authorizedDevicesLoading}
+                error={props.authorizedDevicesError}
+                pendingAuthRequests={props.pendingAuthRequests}
+                pendingAuthRequestsLoading={props.pendingAuthRequestsLoading}
+                pendingAuthRequestsRefreshing={props.pendingAuthRequestsRefreshing}
+                onRefresh={() => void props.onRefreshAuthorizedDevices()}
+                onRefreshPendingAuthRequests={props.onRefreshPendingAuthRequests}
+                onApproveAuthRequest={props.onApproveAuthRequest}
+                onDenyAuthRequest={props.onDenyAuthRequest}
+                onRenameDevice={props.onRenameAuthorizedDevice}
+                onRevokeTrust={props.onRevokeDeviceTrust}
+                onTrustPermanently={props.onTrustDevicePermanently}
+                onRemoveDevice={props.onRemoveDevice}
+                onRemoveSelectedDevices={props.onRemoveSelectedDevices}
+                onRevokeAll={props.onRevokeAllDeviceTrust}
+                onRemoveAll={props.onRemoveAllDevices}
+              />
+            </Suspense>
+          </div>
+        </Route>
+      ))}
       <Route path="/settings/domain-rules">
         <div className="stack domain-rules-route">
           {props.mobileLayout && (
@@ -386,10 +414,11 @@ export default function AppMainRoutes(props: AppMainRoutesProps) {
               error={props.adminError}
               onRefresh={props.onRefreshAdmin}
               onCreateInvite={props.onCreateInvite}
+              onDeleteInvalidInvites={props.onDeleteInvalidInvites}
               onDeleteAllInvites={props.onDeleteAllInvites}
               onToggleUserStatus={props.onToggleUserStatus}
               onDeleteUser={props.onDeleteUser}
-              onRevokeInvite={props.onRevokeInvite}
+              onDeleteInvite={props.onDeleteInvite}
             />
           </Suspense>
         </div>
